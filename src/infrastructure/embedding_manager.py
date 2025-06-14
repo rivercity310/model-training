@@ -59,7 +59,7 @@ class EmbeddingManager:
                 self.model.encode,
                 texts,
                 show_progress_bar=False,
-                convert_to_tensor=True
+                convert_to_tensor=True,
             )
 
             # 임베딩 결과를 각각을 정규화해서 반환

@@ -5,12 +5,7 @@ import faiss
 import os
 from datetime import datetime
 from tqdm import tqdm
-from src.util import (
-    initialize_ncs,
-    get_courses_from_comp_unit_id,
-    Paths,
-    EMB_TB_NM
-)
+from src.util import initialize_ncs, get_courses_from_comp_unit_id, Paths, EMB_TB_NM
 
 
 def build_skill_graph(data: pd.DataFrame, k_neighbors=20, n_probes=10):
@@ -21,7 +16,7 @@ def build_skill_graph(data: pd.DataFrame, k_neighbors=20, n_probes=10):
     # 1. DB에서 불러온 임베딩 벡터를 Faiss가 사용 가능한 형태로 변환
     # - (데이터 개수, 임베딩 차원) 형태의 2D Numpy 배열
     # - float32 자료형
-    embedding_unit_def = np.array(list(data['embedding_unit_def'])).astype('float32')
+    embedding_unit_def = np.array(list(data["embedding_unit_def"])).astype("float32")
     embedding_dimension = embedding_unit_def.shape[1]
 
     # 2. Faiss 인덱스 생성 및 벡터 추가
@@ -30,7 +25,9 @@ def build_skill_graph(data: pd.DataFrame, k_neighbors=20, n_probes=10):
     quantizer = faiss.IndexFlatIP(embedding_dimension)
     nlist = int(np.sqrt(len(embedding_unit_def)))
 
-    index = faiss.IndexIVFFlat(quantizer, embedding_dimension, nlist, faiss.METRIC_INNER_PRODUCT)
+    index = faiss.IndexIVFFlat(
+        quantizer, embedding_dimension, nlist, faiss.METRIC_INNER_PRODUCT
+    )
     index.train(embedding_unit_def)
     index.add(embedding_unit_def)
     index.nprobe = n_probes
@@ -47,17 +44,21 @@ def build_skill_graph(data: pd.DataFrame, k_neighbors=20, n_probes=10):
 
     # 그래프에 노드(능력단위) 추가
     for index, row in data.iterrows():
-        G.add_node(row['comp_unit_id'], name=row['comp_unit_name'], level=row['comp_unit_level'])
+        G.add_node(
+            row["comp_unit_id"],
+            name=row["comp_unit_name"],
+            level=row["comp_unit_level"],
+        )
 
     # 3. 엣지 생성 시, 미리 계산된 임베딩으로 유사도 계산
     for i in tqdm(range(len(data)), desc="엣지 생성 중..."):
-        level_i = int(data.loc[i, 'comp_unit_level'])
+        level_i = int(data.loc[i, "comp_unit_level"])
 
         for neighbor_idx, dist in zip(indices[i], distances[i]):
             if i == neighbor_idx or neighbor_idx < 0:
                 continue
 
-            level_j = int(data.loc[neighbor_idx, 'comp_unit_level'])
+            level_j = int(data.loc[neighbor_idx, "comp_unit_level"])
 
             if level_i >= level_j:
                 continue
@@ -66,7 +67,11 @@ def build_skill_graph(data: pd.DataFrame, k_neighbors=20, n_probes=10):
             level_gap_penalty = (level_j - level_i - 1) * 0.5
             weight = (1 - dist) + level_gap_penalty
 
-            G.add_edge(data.loc[i, 'comp_unit_id'], data.loc[neighbor_idx, 'comp_unit_id'], weight=weight)
+            G.add_edge(
+                data.loc[i, "comp_unit_id"],
+                data.loc[neighbor_idx, "comp_unit_id"],
+                weight=weight,
+            )
 
     return G
 
@@ -77,14 +82,18 @@ def find_career_path(graph: nx.DiGraph, current_skill_ids: list, target_skill_id
     주어진 그래프에서 현재 역량으로부터 목표 역량까지의 최적 경로와 스킬 갭을 찾습니다.
     """
     best_path = None
-    min_path_cost = float('inf')
+    min_path_cost = float("inf")
 
     # 현재 보유한 여러 스킬 중 어떤 스킬에서 출발하는 것이 가장 효율적인지 탐색
     for start_id in current_skill_ids:
         try:
             # 다익스트라 알고리즘으로 최단 경로(최소 비용 경로) 탐색
-            path = nx.dijkstra_path(graph, source=start_id, target=target_skill_id, weight='weight')
-            path_cost = nx.dijkstra_path_length(graph, source=start_id, target=target_skill_id, weight='weight')
+            path = nx.dijkstra_path(
+                graph, source=start_id, target=target_skill_id, weight="weight"
+            )
+            path_cost = nx.dijkstra_path_length(
+                graph, source=start_id, target=target_skill_id, weight="weight"
+            )
 
             if path_cost < min_path_cost:
                 min_path_cost = path_cost
@@ -98,7 +107,9 @@ def find_career_path(graph: nx.DiGraph, current_skill_ids: list, target_skill_id
         return None, None  # 경로를 찾지 못한 경우
 
     # 스킬 갭 = 추천 경로 중 현재 보유 역량을 제외한 나머지
-    skill_gap = [skill_id for skill_id in best_path if skill_id not in current_skill_ids]
+    skill_gap = [
+        skill_id for skill_id in best_path if skill_id not in current_skill_ids
+    ]
 
     return best_path, skill_gap
 
@@ -113,9 +124,9 @@ if __name__ == "__main__":
 
     # CSV 파일 읽어오고 임베딩 컬럼 가공
     df = pd.read_csv(Paths.F_EMB_CSV)
-    df['comp_unit_id'] = df['comp_unit_id'].astype(str).str.strip()
-    df['embedding_unit_def'] = df['embedding_unit_def'].apply(
-        lambda x: np.fromstring(x.strip('[]'), sep=',')
+    df["comp_unit_id"] = df["comp_unit_id"].astype(str).str.strip()
+    df["embedding_unit_def"] = df["embedding_unit_def"].apply(
+        lambda x: np.fromstring(x.strip("[]"), sep=",")
     )
 
     # 결과를 저장할 리스트
@@ -124,36 +135,52 @@ if __name__ == "__main__":
     # 1. 역량 관계망 그래프 생성
     print("Step 1: 역량 관계망 그래프를 구축합니다...")
     skill_graph = build_skill_graph(df)
-    print(f"Graph Generated [Node: {skill_graph.number_of_nodes()}, Edge: {skill_graph.number_of_edges()}]\n")
+    print(
+        f"Graph Generated [Node: {skill_graph.number_of_nodes()}, Edge: {skill_graph.number_of_edges()}]\n"
+    )
 
     if df is not None and not df.empty:
-        comp_unit_id = "2001030406" # input("능력단위 ID (쉼표로 구분): ")
-        comp_unit_ids = [s.strip() for s in comp_unit_id.split(',')]
-        target_comp_unit_id = "2001030407" # input("타겟 ID: ")
+        comp_unit_id = "2001030406"  # input("능력단위 ID (쉼표로 구분): ")
+        comp_unit_ids = [s.strip() for s in comp_unit_id.split(",")]
+        target_comp_unit_id = "2001030407"  # input("타겟 ID: ")
 
         if not all(s_id in skill_graph.nodes for s_id in comp_unit_ids):
-            missing_ids = [s_id for s_id in comp_unit_ids if s_id not in skill_graph.nodes]
-            print(f"오류: 입력한 능력단위 ID 중 다음 ID(들)이 그래프에 존재하지 않습니다: {', '.join(missing_ids)}. 다시 확인해주세요.")
+            missing_ids = [
+                s_id for s_id in comp_unit_ids if s_id not in skill_graph.nodes
+            ]
+            print(
+                f"오류: 입력한 능력단위 ID 중 다음 ID(들)이 그래프에 존재하지 않습니다: {', '.join(missing_ids)}. 다시 확인해주세요."
+            )
             exit(0)
 
         if target_comp_unit_id not in skill_graph.nodes:
-            print(f"입력한 타겟 능력단위 ID '{target_comp_unit_id}'가 그래프에 존재하지 않습니다.")
+            print(
+                f"입력한 타겟 능력단위 ID '{target_comp_unit_id}'가 그래프에 존재하지 않습니다."
+            )
             exit(0)
 
         # 분석 시작 메시지는 파일에도 포함
         output_lines.append("=" * 70)
-        output_lines.append(f"▶ 분석 요청 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        output_lines.append(
+            f"▶ 분석 요청 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
         output_lines.append("=" * 70)
 
         output_lines.append("\n[최적 경로 및 스킬 갭 분석]")
         output_lines.append(f"▶ 현재 보유 역량")
         for s in comp_unit_ids:
-            output_lines.append(f"\t- {skill_graph.nodes[s]['name']} (Level {skill_graph.nodes[s]['level']})")
+            output_lines.append(
+                f"\t- {skill_graph.nodes[s]['name']} (Level {skill_graph.nodes[s]['level']})"
+            )
         output_lines.append(f"\n▶ 목표 역량")
-        output_lines.append(f"\t- {skill_graph.nodes[target_comp_unit_id]['name']} (Level {skill_graph.nodes[target_comp_unit_id]['level']})\n")
+        output_lines.append(
+            f"\t- {skill_graph.nodes[target_comp_unit_id]['name']} (Level {skill_graph.nodes[target_comp_unit_id]['level']})\n"
+        )
 
         # 3. 경로 탐색 및 결과 출력
-        recommended_path, skill_gap = find_career_path(skill_graph, comp_unit_ids, target_comp_unit_id)
+        recommended_path, skill_gap = find_career_path(
+            skill_graph, comp_unit_ids, target_comp_unit_id
+        )
         current_lecture_set = set()
         target_lecture_set = set()
 
@@ -164,7 +191,9 @@ if __name__ == "__main__":
             for i, skill_id in enumerate(recommended_path):
                 node = skill_graph.nodes[skill_id]
                 status = "✅ (보유)" if skill_id in comp_unit_ids else "🎯 (학습 필요)"
-                output_lines.append(f"\t- {i + 1}. {node['name']} (Level {node['level']}) {status}")
+                output_lines.append(
+                    f"\t- {i + 1}. {node['name']} (Level {node['level']}) {status}"
+                )
 
             output_lines.append("\n💡현재 보유한 역량 관련 강의")
             courses = get_courses_from_comp_unit_id(comp_unit_id)
@@ -187,7 +216,9 @@ if __name__ == "__main__":
                 output_lines.append("\n")
 
         else:
-            output_lines.append("분석 실패: 목표 역량까지 도달 가능한 경로를 찾을 수 없습니다.")
+            output_lines.append(
+                "분석 실패: 목표 역량까지 도달 가능한 경로를 찾을 수 없습니다."
+            )
 
         # --- 프로그램 종료 시점에 파일 저장 ---
         Paths.ANALYSIS.mkdir(parents=True, exist_ok=True)
@@ -197,6 +228,6 @@ if __name__ == "__main__":
         output_filename = Paths.ANALYSIS / f"skill_analysis_report_{timestamp}.txt"
 
         with open(output_filename, "w", encoding="utf-8") as f:
-            f.write('\n'.join(output_lines))
+            f.write("\n".join(output_lines))
 
         print(f"\n분석 결과가 '{output_filename}' 파일에 성공적으로 저장되었습니다.")

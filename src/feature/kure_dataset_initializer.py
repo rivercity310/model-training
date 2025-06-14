@@ -16,7 +16,7 @@ from src.util import (
     EMB_TB_NM,
     KURE_DATASET_GLOB,
     initialize_ncs,
-    parse_json_from_text
+    parse_json_from_text,
 )
 
 # 환경변수 로드
@@ -39,7 +39,9 @@ elif "openai" in MODEL_PROVIDER and not os.environ.get("OPENAI_API_KEY"):
 # --- Pydantic 모델 정의 ---
 class Question(BaseModel):
     input: str = Field(description="NCS 직무와 관련된 예상 사용자 질문")
-    similarity: float = Field(description="예상 질문과 NCS 직무 정보 간의 의미적 유사도 점수 (0.5에서 1.0 사이)")
+    similarity: float = Field(
+        description="예상 질문과 NCS 직무 정보 간의 의미적 유사도 점수 (0.5에서 1.0 사이)"
+    )
 
 
 class GeneratedQuestionList(BaseModel):
@@ -54,14 +56,11 @@ class NCSDatasetGenerator:
 
     @staticmethod
     def _create_chain():
-        """LangChain의 모든 구성 요소를 설정하고, 완성된 체인을 생성합니다."""
+        """LangChain 구성 요소 세팅 및 완성된 체인 생성"""
         print("LangChain 체인을 초기화합니다...")
 
         # 모델 초기화
-        model = init_chat_model(
-            model=MODEL_NAME,
-            model_provider=MODEL_PROVIDER
-        )
+        model = init_chat_model(model=MODEL_NAME, model_provider=MODEL_PROVIDER)
 
         # 파서 초기화
         parser = PydanticOutputParser(pydantic_object=GeneratedQuestionList)
@@ -88,19 +87,17 @@ class NCSDatasetGenerator:
         prompt_template = PromptTemplate(
             template=template_string,
             input_variables=["ncs_name", "ncs_level", "ncs_desc"],
-            partial_variables={"format_instructions": format_instructions}
+            partial_variables={"format_instructions": format_instructions},
         )
 
         return prompt_template | model | StrOutputParser(), parser
 
     def generate_for_ncs_item(self, ncs_name: str, ncs_level: int, ncs_desc: str):
-        """단일 NCS 항목에 대해 질문 리스트를 생성합니다."""
+        """단일 NCS 항목에 대해 질문 리스트 생성"""
         try:
-            response_text = self.chain.invoke({
-                "ncs_name": ncs_name,
-                "ncs_level": ncs_level,
-                "ncs_desc": ncs_desc
-            })
+            response_text = self.chain.invoke(
+                {"ncs_name": ncs_name, "ncs_level": ncs_level, "ncs_desc": ncs_desc}
+            )
 
             json_string = parse_json_from_text(response_text)
 
@@ -116,7 +113,7 @@ class NCSDatasetGenerator:
 
 def save_dataset(filepath: Path, data_to_append: list):
     """
-    JSON 파일에 데이터를 이어쓰거나 새로 생성합니다.
+    JSON 파일에 데이터를 이어쓰거나 새로 생성
 
     Args:
         filepath (Path): 저장할 파일 경로
@@ -129,10 +126,12 @@ def save_dataset(filepath: Path, data_to_append: list):
         if not filepath.parent.exists():
             filepath.parent.mkdir()
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data_to_append, f, ensure_ascii=False, indent=2)
 
-        print(f"\n✅ {len(data_to_append)}개 항목을 '{filepath}'에 성공적으로 저장했습니다.")
+        print(
+            f"\n✅ {len(data_to_append)}개 항목을 '{filepath}'에 성공적으로 저장했습니다."
+        )
 
     except Exception as e:
         print(f"\n❌ 파일 저장 중 오류 발생: {e}")
@@ -149,11 +148,14 @@ def get_processed_ids() -> set[str]:
     # kure_dataset_*.json 패턴을 가진 모든 파일을 찾습니다.
     for filepath in output_dir.glob(KURE_DATASET_GLOB):
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for item in data:
-                    if 'positive_document' in item and 'ncs_code' in item['positive_document']:
-                        processed_ids.add(item['positive_document']['ncs_code'])
+                    if (
+                        "positive_document" in item
+                        and "ncs_code" in item["positive_document"]
+                    ):
+                        processed_ids.add(item["positive_document"]["ncs_code"])
         except (json.JSONDecodeError, KeyError) as e:
             print(f"WARN: '{filepath}' 파일 처리 중 오류 발생. 건너뜁니다. ({e})")
             continue
@@ -167,19 +169,17 @@ def get_batch_num() -> int:
 
 def process_row(row):
     """DataFrame의 한 행을 받아 LLM을 호출하고 결과를 파싱하여 반환합니다."""
-    code = row['comp_unit_id']
-    name = row['comp_unit_name']
-    level = row['comp_unit_level']
-    desc = row['comp_unit_def']
+    code = row["comp_unit_id"]
+    name = row["comp_unit_name"]
+    level = row["comp_unit_level"]
+    desc = row["comp_unit_def"]
 
-    # 이 부분이 병렬로 실행될 핵심 작업입니다.
     results = ncs_dataset_generator.generate_for_ncs_item(name, level, desc)
 
     if results is None:
         print(f"WARN: {name}({code}) 직무의 응답을 파싱할 수 없습니다. 건너뜁니다.")
-        return None  # 실패한 경우 None을 반환
+        return None
 
-    # 성공한 경우, 저장할 레코드 리스트를 생성하여 반환합니다.
     records = []
     for question in results.questions:
         record = {
@@ -188,9 +188,9 @@ def process_row(row):
                 "ncs_code": str(code),
                 "ncs_title": str(name),
                 "ncs_description": str(desc),
-                "level": int(level)
+                "level": int(level),
             },
-            "similarity": question.similarity
+            "similarity": question.similarity,
         }
         records.append(record)
 
@@ -206,13 +206,15 @@ if __name__ == "__main__":
 
     df = pd.read_csv(Paths.F_EMB_CSV)
 
-    # 시작 전, 이미 처리된 항목들 ID 로드
+    # 이미 처리된 항목들 ID 로드
     processed_ids = get_processed_ids()
     if processed_ids:
-        print(f"INFO: 기존에 처리된 {len(processed_ids)}개의 항목을 발견했습니다. 이어서 작업을 시작합니다.")
+        print(
+            f"INFO: 기존에 처리된 {len(processed_ids)}개의 항목을 발견했습니다. 이어서 작업을 시작합니다."
+        )
 
     # 처리되지 않은 데이터만 필터링
-    unprocessed_df = df[~df['comp_unit_id'].astype(str).isin(processed_ids)].copy()
+    unprocessed_df = df[~df["comp_unit_id"].astype(str).isin(processed_ids)].copy()
 
     if unprocessed_df.empty:
         print("🎉 모든 항목이 이미 처리되었습니다. 작업을 종료합니다.")
@@ -241,7 +243,9 @@ if __name__ == "__main__":
 
         print(f"{len(futures)}개의 작업을 모두 제출했습니다. 이제 결과를 기다립니다...")
 
-        for future in tqdm(as_completed(futures), total=len(futures), desc="NCS 데이터셋 생성 중"):
+        for future in tqdm(
+            as_completed(futures), total=len(futures), desc="NCS 데이터셋 생성 중"
+        ):
             records = future.result()
 
             if records is None:

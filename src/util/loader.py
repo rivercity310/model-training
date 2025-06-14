@@ -56,14 +56,14 @@ def get_courses_from_comp_unit_id(comp_unit_id):
         AND del_yn = 'N'
     """
 
-    params = {'comp_id': comp_unit_id}
+    params = {"comp_id": comp_unit_id}
     df = pd.read_sql(query, engine, params=params)
 
     if df.empty:
         return []
 
     # dict.fromkeys()를 사용하여 순서를 유지하며 중복 제거
-    sbj_nm_list = df['sbj_nm'].tolist()
+    sbj_nm_list = df["sbj_nm"].tolist()
     return list(dict.fromkeys(sbj_nm_list))
 
 

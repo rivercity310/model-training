@@ -32,14 +32,14 @@ if is_available:
 
 
 def load_ncs_dataset(path):
-    """ JSON 파일을 불러와 모델 학습에 맞는 InputExample 리스트로 병환 """
+    """JSON 파일을 불러와 모델 학습에 맞는 InputExample 리스트로 병환"""
     train_examples = []
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
         for item in data:
-            query = item['query']
-            positive_doc = item['positive_document']
-            similarity = float(item['similarity'])
+            query = item["query"]
+            positive_doc = item["positive_document"]
+            similarity = float(item["similarity"])
             target = f"{positive_doc['ncs_title']}: {positive_doc['ncs_description']}"
             train_examples.append(InputExample(texts=[query, target], label=similarity))
 
@@ -81,7 +81,9 @@ def train() -> bool:
     train_size = int(len(all_filepaths) * 0.9)
     train_filepaths = all_filepaths[:train_size]
     eval_filepaths = all_filepaths[train_size:]
-    print(f"[데이터] 전체 파일 수: {len(all_filepaths)}, 훈련 파일 수: {len(train_filepaths)}, 검증 파일 수: {len(eval_filepaths)}")
+    print(
+        f"[데이터] 전체 파일 수: {len(all_filepaths)}, 훈련 파일 수: {len(train_filepaths)}, 검증 파일 수: {len(eval_filepaths)}"
+    )
 
     # 훈련 데이터용 IterableDataset 인스턴스 생성
     train_dataset = NcsStreamDataset(train_filepaths)
@@ -93,11 +95,15 @@ def train() -> bool:
         eval_samples.extend(load_ncs_dataset(filepath))
 
     if not eval_samples:
-        print("검증 데이터가 없습니다. 계속 진행하지만, 모델 성능 검증 및 자동 저장은 수행되지 않습니다.")
+        print(
+            "검증 데이터가 없습니다. 계속 진행하지만, 모델 성능 검증 및 자동 저장은 수행되지 않습니다."
+        )
         evaluator = None
     else:
         print(f"[데이터] 검증 샘플 수: {len(eval_samples)}")
-        evaluator = EmbeddingSimilarityEvaluator.from_input_examples(eval_samples, name='ncs-eval')
+        evaluator = EmbeddingSimilarityEvaluator.from_input_examples(
+            eval_samples, name="ncs-eval"
+        )
 
     # 모델
     model_name = os.getenv("EMBEDDING_MODEL")
@@ -134,7 +140,7 @@ def train() -> bool:
         warmup_steps=warmup_steps,
         output_path=str(MODEL_OUTPUT_PATH),
         optimizer_params={"lr": learning_rate},
-        show_progress_bar=True
+        show_progress_bar=True,
     )
 
     print("🎉 모델 학습이 완료되었습니다.")
@@ -147,7 +153,7 @@ def train() -> bool:
     return True
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     success = train()
 
     if not success:
@@ -170,36 +176,40 @@ if __name__ == '__main__':
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             for item in data:
-                corpus_docs_data.append({
-                    "code": item['positive_document']['ncs_code'],
-                    "content": f"{item['positive_document']['ncs_title']}: {item['positive_document']['ncs_description']}]"
-                })
+                corpus_docs_data.append(
+                    {
+                        "code": item["positive_document"]["ncs_code"],
+                        "content": f"{item['positive_document']['ncs_title']}: {item['positive_document']['ncs_description']}]",
+                    }
+                )
 
-        corpus_contents = [doc['content'] for doc in corpus_docs_data]
+        corpus_contents = [doc["content"] for doc in corpus_docs_data]
 
         # Corpus를 벡터로 변환
         corpus_embeddings = finetuned_model.encode(
-            corpus_contents,
-            convert_to_tensor=True,
-            show_progress_bar=True
+            corpus_contents, convert_to_tensor=True, show_progress_bar=True
         )
 
         # 테스트 질의
         while True:
             test_query = input("Query: ")
-            test_query_embedding = finetuned_model.encode(test_query, convert_to_tensor=True)
+            test_query_embedding = finetuned_model.encode(
+                test_query, convert_to_tensor=True
+            )
 
             # 의미론적 검색
-            hits = util.semantic_search(test_query_embedding, corpus_embeddings, top_k=3)[0]
+            hits = util.semantic_search(
+                test_query_embedding, corpus_embeddings, top_k=3
+            )[0]
 
             # 결과 출력
-            print(f"\n--- 테스트 질의: \"{test_query}\" ---")
+            print(f'\n--- 테스트 질의: "{test_query}" ---')
             print("가장 유사한 NCS 직무 TOP 3:")
             for hit in hits:
-                doc_index = hit['corpus_id']
-                score = hit['score']
-                ncs_code = corpus_docs_data[doc_index]['code']
-                doc_content = corpus_docs_data[doc_index]['content']
+                doc_index = hit["corpus_id"]
+                score = hit["score"]
+                ncs_code = corpus_docs_data[doc_index]["code"]
+                doc_content = corpus_docs_data[doc_index]["content"]
 
                 print(f"  - NCS 코드: {ncs_code} (유사도: {score:.4f})")
                 print(f"    내용: {doc_content}\n")

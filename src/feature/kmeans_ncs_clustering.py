@@ -19,12 +19,12 @@ def show_training_graph(vectors, random_state: int = 42):
     inertia_values = []
 
     for k in tqdm(k_range, desc="엘보우 방법 실행 중..."):
-        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init='auto')
+        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init="auto")
         kmeans.fit(vectors)
         inertia_values.append(kmeans.inertia_)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(k_range, inertia_values, marker='o')
+    plt.plot(k_range, inertia_values, marker="o")
     plt.xlabel("Number of clusters (K)")
     plt.ylabel("Inertia")
     plt.grid(True)
@@ -43,7 +43,9 @@ if __name__ == "__main__":
     # CSV 텍스트 형태 데이터 가공 -> Numpy 배열로 변환
     df = pd.read_csv(Paths.F_EMB_CSV)
     EMB_COL_KEY = "embedding_unit_def"
-    df[EMB_COL_KEY] = df[EMB_COL_KEY].apply(lambda x: np.fromstring(x.strip('[]'), sep=','))
+    df[EMB_COL_KEY] = df[EMB_COL_KEY].apply(
+        lambda x: np.fromstring(x.strip("[]"), sep=",")
+    )
     embedding_vectors = np.stack(df[EMB_COL_KEY].values).astype(np.float32)
 
     if DEBUG_MODE:
@@ -51,18 +53,20 @@ if __name__ == "__main__":
 
     # 모델 훈련
     OPTIMAL_K = 20
-    kmeans = KMeans(n_clusters=OPTIMAL_K, random_state=42, n_init='auto')
+    kmeans = KMeans(n_clusters=OPTIMAL_K, random_state=42, n_init="auto")
     kmeans.fit(embedding_vectors)
 
     # 학습 이후 Cluster ID 열 추가 -> 매번 최신 클러스터링 결과로 갱신
-    df['cluster_id'] = kmeans.labels_
+    df["cluster_id"] = kmeans.labels_
 
     # ---
 
     user_input = input("사용자 키워드 입력: ")
 
     # 사용자 입력에 대한 임베딩 생성
-    user_embedding = asyncio.run(get_embedding_manager().get_avg_query_embedding([user_input]))
+    user_embedding = asyncio.run(
+        get_embedding_manager().get_avg_query_embedding([user_input])
+    )
 
     # Tensor가 GPU(CUDA) 장치에 할당된 경우 Numpy로 변환하기 위해 cpu 메모리로 옮기는 작업이 필요
     if isinstance(user_embedding, torch.Tensor):
@@ -75,6 +79,6 @@ if __name__ == "__main__":
     print(f"사용자 입력에 대한 클러스터 ID: {predicted_cluster_id}")
 
     # 해당 클러스터의 데이터프레임 추출
-    cluster_df = df[df['cluster_id'] == predicted_cluster_id[0]]
+    cluster_df = df[df["cluster_id"] == predicted_cluster_id[0]]
     print(f"\nCluster {predicted_cluster_id[0]}의 데이터:")
-    print(cluster_df[['comp_unit_name', 'comp_unit_id', 'cluster_id']].head())
+    print(cluster_df[["comp_unit_name", "comp_unit_id", "cluster_id"]].head())
