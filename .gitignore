@@ -21,6 +21,7 @@ Thumbs.db
 data/
 logs/
 csv/
+analysis/
 
 # 환경 변수 파일
 .env

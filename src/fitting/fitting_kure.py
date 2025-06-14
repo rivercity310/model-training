@@ -1,17 +1,7 @@
-import pandas as pd
-import numpy as np
-import networkx as nx
-import matplotlib.pyplot as plt
-import faiss
-import asyncio
-import torch
 import os
-from tqdm import tqdm
 from sentence_transformers import SentenceTransformer, losses
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 from sentence_transformers.readers import InputExample
-from sklearn.cluster import KMeans
-from sqlalchemy import create_engine
 
 
 def train():
