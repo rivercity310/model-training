@@ -1,5 +1,7 @@
 import pandas as pd
 import os
+import json
+import re
 from sqlmodel import create_engine
 from dotenv import load_dotenv
 
@@ -63,3 +65,40 @@ def get_courses_from_comp_unit_id(comp_unit_id):
     # dict.fromkeys()를 사용하여 순서를 유지하며 중복 제거
     sbj_nm_list = df['sbj_nm'].tolist()
     return list(dict.fromkeys(sbj_nm_list))
+
+
+def parse_json_from_text(text: str) -> dict | None:
+    """
+    마크다운 코드 블록(```json)으로 감싸인 JSON 문자열을 텍스트에서 추출하고 파싱합니다.
+
+    Args:
+        text: JSON 코드 블록을 포함한 전체 텍스트
+
+    Returns:
+        파싱된 Python 딕셔너리. 찾지 못하거나 파싱에 실패하면 None을 반환합니다.
+    """
+    pattern = re.compile(r"```json(.*?)```", re.DOTALL)
+
+    # 텍스트에서 패턴 검색
+    match = pattern.search(text)
+
+    if match:
+        # 첫 번째 캡처 그룹(괄호 안의 내용)을 가져옵니다.
+        # group(0)은 매치된 전체 문자열 "```json...```"
+        # group(1)은 첫 번째 괄호 안의 내용 "..."
+        json_string = match.group(1)
+
+        # 앞뒤 공백 및 줄바꿈 문자 제거
+        json_string = json_string.strip()
+
+        try:
+            # 추출된 문자열을 JSON으로 파싱
+            parsed_data = json.loads(json_string)
+            return parsed_data
+        except json.JSONDecodeError as e:
+            print(f"오류: 추출된 문자열이 유효한 JSON 형식이 아닙니다. (Error: {e})")
+            print(f"추출된 문자열: {json_string}")
+            return None
+    else:
+        print("오류: 텍스트에서 '```json ... ```' 패턴을 찾을 수 없습니다.")
+        return None
