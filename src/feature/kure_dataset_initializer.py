@@ -2,6 +2,7 @@ import pandas as pd
 import time
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from tqdm import tqdm
@@ -25,6 +26,7 @@ load_dotenv()
 API_KEY = os.getenv("LLM_API_KEY")
 MODEL_NAME = os.getenv("LLM_MODEL_NAME")
 MODEL_PROVIDER = os.getenv("LLM_MODEL_PROVIDER")
+IS_GEMINI = MODEL_PROVIDER == "google_genai"
 
 # API 키 세팅
 if "google" in MODEL_PROVIDER and not os.environ.get("GOOGLE_API_KEY"):
@@ -163,7 +165,40 @@ def get_batch_num() -> int:
     return len(list(Paths.KURE_DATASET.glob(KURE_DATASET_GLOB))) + 1
 
 
+def process_row(row):
+    """DataFrame의 한 행을 받아 LLM을 호출하고 결과를 파싱하여 반환합니다."""
+    code = row['comp_unit_id']
+    name = row['comp_unit_name']
+    level = row['comp_unit_level']
+    desc = row['comp_unit_def']
+
+    # 이 부분이 병렬로 실행될 핵심 작업입니다.
+    results = ncs_dataset_generator.generate_for_ncs_item(name, level, desc)
+
+    if results is None:
+        print(f"WARN: {name}({code}) 직무의 응답을 파싱할 수 없습니다. 건너뜁니다.")
+        return None  # 실패한 경우 None을 반환
+
+    # 성공한 경우, 저장할 레코드 리스트를 생성하여 반환합니다.
+    records = []
+    for question in results.questions:
+        record = {
+            "query": question.input,
+            "positive_document": {
+                "ncs_code": str(code),
+                "ncs_title": str(name),
+                "ncs_description": str(desc),
+                "level": int(level)
+            },
+            "similarity": question.similarity
+        }
+        records.append(record)
+
+    return records
+
+
 if __name__ == "__main__":
+    print(f"모델 공급자: {MODEL_PROVIDER}")
     ncs_dataset_generator = NCSDatasetGenerator()
 
     if not Paths.F_EMB_CSV.exists():
@@ -189,49 +224,41 @@ if __name__ == "__main__":
     CALLS_PER_MINUTE_LIMIT = 15
     SAVE_BATCH_SIZE = 50
     SLEEP_INTERVAL = 60 / CALLS_PER_MINUTE_LIMIT  # 호출 사이의 최소 대기 시간
+    MAX_WORKERS = 1 if IS_GEMINI else 10
 
     results_buffer = []
     call_counter = 0
 
-    for index, row in tqdm(unprocessed_df.iterrows(), total=unprocessed_df.shape[0], desc="NCS 데이터셋 생성 중"):
-        if call_counter > 0:
-            time.sleep(SLEEP_INTERVAL)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
 
-        code = row['comp_unit_id']
-        name = row['comp_unit_name']
-        level = row['comp_unit_level']
-        desc = row['comp_unit_def']
+        for index, row in unprocessed_df.iterrows():
+            future = executor.submit(process_row, row)
+            futures.append(future)
 
-        results = ncs_dataset_generator.generate_for_ncs_item(name, level, desc)
-        call_counter += 1
+            if IS_GEMINI:
+                time.sleep(SLEEP_INTERVAL)
 
-        if results is None:
-            print(f"WARN: {name}({code}) 직무의 응답을 파싱할 수 없습니다. 건너뜁니다.")
-            continue
+        print(f"{len(futures)}개의 작업을 모두 제출했습니다. 이제 결과를 기다립니다...")
 
-        print(results)
+        for future in tqdm(as_completed(futures), total=len(futures), desc="NCS 데이터셋 생성 중"):
+            records = future.result()
 
-        # LLM 응답을 최종 저장 형식으로 변환하여 버퍼에 추가
-        for question in results.questions:
-            record = {
-                "query": question.input,
-                "positive_document": {
-                    "ncs_code": str(code),
-                    "ncs_title": str(name),
-                    "ncs_description": str(desc),
-                    "level": int(level)
-                },
-                "similarity": question.similarity
-            }
+            if records is None:
+                continue
 
-            results_buffer.append(record)
+            print(records)
 
-        # 3. n번 호출마다 파일에 저장
-        if call_counter % SAVE_BATCH_SIZE == 0:
-            filepath = Paths.get_kure_dataset_json(get_batch_num())
-            save_dataset(filepath, results_buffer)
-            results_buffer.clear()
+            results_buffer.extend(records)
+            call_counter += 1
 
+            # N번 호출마다 파일에 저장
+            if call_counter > 0 and call_counter % SAVE_BATCH_SIZE == 0:
+                filepath = Paths.get_kure_dataset_json(get_batch_num())
+                save_dataset(filepath, results_buffer)
+                results_buffer.clear()
+
+    # 루프가 끝난 후 버퍼에 남은 데이터가 있으면 마지막으로 저장
     if results_buffer:
         filepath = Paths.get_kure_dataset_json(get_batch_num())
         save_dataset(filepath, results_buffer)
