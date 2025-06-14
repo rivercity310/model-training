@@ -1,3 +1,9 @@
+## 주요 기술스택
+- Pytorch
+- LangChain
+- SentenceTransformer
+- Faiss
+
 ## 시스템 요구사항
 
 - Python 3.12+

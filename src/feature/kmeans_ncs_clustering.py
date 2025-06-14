@@ -24,7 +24,7 @@ CSV_DIR_PATH = ROOT_DIR / "data" / "csv"
 DATA_FILE_PATH = CSV_DIR_PATH / "ncs_comp_unit.csv"
 
 # DEBUG 모드 유무
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 # DB 데이터를 불러와서 로컬 csv 파일로 저장
