@@ -4,43 +4,13 @@ import networkx as nx
 import faiss
 import os
 from datetime import datetime
-from pathlib import Path
 from tqdm import tqdm
-from dotenv import load_dotenv
-from sqlmodel import create_engine
-
-# 환경변수 로드
-load_dotenv()
-
-# DB Engine
-url = os.getenv("DATABASE_URL")
-engine = create_engine(url=url, echo=True)
-
-# 경로
-EMB_TABLE_NAME = "tb_ncs_comp_unit_emb_test"
-ROOT_DIR = Path(os.getenv("PROJECT_ROOT_DIR")).resolve()
-CSV_DIR_PATH = ROOT_DIR / "data" / "csv"
-ANALYSIS_DIR_PATH = ROOT_DIR / "data" / "analysis"
-DATA_FILE_PATH = CSV_DIR_PATH / f"{EMB_TABLE_NAME}.csv"
-
-
-def initialize_csv():
-    query = f"""
-        SELECT
-        unit.comp_unit_id,
-        unit.comp_unit_name,
-        unit.comp_unit_def,
-        unit.comp_unit_level,
-        emb.embedding_unit_def
-        FROM {EMB_TABLE_NAME} emb
-        JOIN tb_ncs_comp_unit unit
-        ON emb.comp_unit_id = unit.comp_unit_id
-        WHERE unit.useflag = 'Y' AND unit.use_ncs = 'Y'
-    """
-
-    df = pd.read_sql(query, engine)
-    df.to_csv(DATA_FILE_PATH, index=False, encoding="utf-8-sig")
-    print(f"성공적으로 {len(df)}건의 데이터를 불러왔습니다.")
+from src.util import (
+    initialize_ncs,
+    get_courses_from_comp_unit_id,
+    Paths,
+    EMB_TB_NM
+)
 
 
 def build_skill_graph(data: pd.DataFrame, k_neighbors=20, n_probes=10):
@@ -133,43 +103,16 @@ def find_career_path(graph: nx.DiGraph, current_skill_ids: list, target_skill_id
     return best_path, skill_gap
 
 
-def get_course_from_node(comp_unit_id, engine):
-    query = """
-        SELECT sbj_nm FROM tb_cos_m
-        WHERE cos_id IN (
-            SELECT cos_id FROM tb_cos_ncs_mat_d mat
-            WHERE mat.comp_unit_id = %(comp_id)s
-            AND mat.useflag = 'Y'
-            AND mat.del_yn = 'N'
-            AND mat.match_rate >= 75
-            ORDER BY mat.match_rate DESC
-            LIMIT 10
-        ) 
-        AND useflag = 'Y' 
-        AND del_yn = 'N'
-    """
-
-    params = {'comp_id': comp_unit_id}
-    df = pd.read_sql(query, engine, params=params)
-
-    if df.empty:
-        return []
-
-    # dict.fromkeys()를 사용하여 순서를 유지하며 중복 제거
-    sbj_nm_list = df['sbj_nm'].tolist()
-    return list(dict.fromkeys(sbj_nm_list))
-
-
 if __name__ == "__main__":
-    if not os.path.exists(CSV_DIR_PATH):
-        CSV_DIR_PATH.mkdir(parents=True)
+    if not os.path.exists(Paths.CSV):
+        Paths.CSV.mkdir(parents=True)
 
     # CSV 파일이 없는 경우 DB에서 초기화
-    if not os.path.exists(DATA_FILE_PATH):
-        initialize_csv()
+    if not os.path.exists(Paths.F_EMB_CSV):
+        initialize_ncs(EMB_TB_NM).to_csv(Paths.F_EMB_CSV, index=False)
 
     # CSV 파일 읽어오고 임베딩 컬럼 가공
-    df = pd.read_csv(DATA_FILE_PATH)
+    df = pd.read_csv(Paths.F_EMB_CSV)
     df['comp_unit_id'] = df['comp_unit_id'].astype(str).str.strip()
     df['embedding_unit_def'] = df['embedding_unit_def'].apply(
         lambda x: np.fromstring(x.strip('[]'), sep=',')
@@ -224,7 +167,7 @@ if __name__ == "__main__":
                 output_lines.append(f"\t- {i + 1}. {node['name']} (Level {node['level']}) {status}")
 
             output_lines.append("\n💡현재 보유한 역량 관련 강의")
-            courses = get_course_from_node(comp_unit_id, engine)
+            courses = get_courses_from_comp_unit_id(comp_unit_id)
             for course in courses:
                 if course not in current_lecture_set:
                     output_lines.append(f"\t- {course}")
@@ -234,7 +177,7 @@ if __name__ == "__main__":
             for skill_id in skill_gap:
                 node = skill_graph.nodes[skill_id]
                 output_lines.append(f"{node['name']} (Level {node['level']})")
-                courses = get_course_from_node(skill_id, engine)
+                courses = get_courses_from_comp_unit_id(skill_id)
 
                 for course in courses:
                     if course not in target_lecture_set:
@@ -247,11 +190,11 @@ if __name__ == "__main__":
             output_lines.append("분석 실패: 목표 역량까지 도달 가능한 경로를 찾을 수 없습니다.")
 
         # --- 프로그램 종료 시점에 파일 저장 ---
-        ANALYSIS_DIR_PATH.mkdir(parents=True, exist_ok=True)  # 결과 저장할 디렉토리 생성
+        Paths.ANALYSIS.mkdir(parents=True, exist_ok=True)
 
         # 파일명에 현재 날짜와 시간 포함
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = ANALYSIS_DIR_PATH / f"skill_analysis_report_{timestamp}.txt"
+        output_filename = Paths.ANALYSIS / f"skill_analysis_report_{timestamp}.txt"
 
         with open(output_filename, "w", encoding="utf-8") as f:
             f.write('\n'.join(output_lines))

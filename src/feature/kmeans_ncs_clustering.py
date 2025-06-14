@@ -4,43 +4,13 @@ import pandas as pd
 import asyncio
 import os
 import torch
-from pathlib import Path
-from dotenv import load_dotenv
 from tqdm import tqdm
-from sqlmodel import create_engine
 from sklearn.cluster import KMeans
 from src.infrastructure import get_embedding_manager
-
-# 환경변수 로드
-load_dotenv()
-
-# DB Engine
-url = os.getenv("DATABASE_URL")
-engine = create_engine(url=url, echo=True)
-
-# 경로
-ROOT_DIR = Path(os.getenv("PROJECT_ROOT_DIR")).resolve()
-CSV_DIR_PATH = ROOT_DIR / "data" / "csv"
-DATA_FILE_PATH = CSV_DIR_PATH / "ncs_comp_unit.csv"
+from src.util import initialize_ncs, Paths, EMB_TB_NM
 
 # DEBUG 모드 유무
-DEBUG_MODE = True
-
-
-# DB 데이터를 불러와서 로컬 csv 파일로 저장
-def initialize_csv():
-    # 1. 데이터 로드
-    query = """
-        SELECT
-            *
-        FROM tb_ncs_comp_unit_emb_test emb
-        JOIN tb_ncs_comp_unit unit
-        ON emb.comp_unit_id = unit.comp_unit_id
-        WHERE useflag = 'Y' AND use_ncs = 'Y'
-    """
-
-    df = pd.read_sql(query, engine)
-    df.to_csv(DATA_FILE_PATH, index=False, encoding="utf-8-sig")
+DEBUG_MODE = False
 
 
 def show_training_graph(vectors, random_state: int = 42):
@@ -63,15 +33,15 @@ def show_training_graph(vectors, random_state: int = 42):
 
 
 if __name__ == "__main__":
-    if not os.path.exists(CSV_DIR_PATH):
-        CSV_DIR_PATH.mkdir(parents=True)
+    if not os.path.exists(Paths.CSV):
+        Paths.CSV.mkdir(parents=True)
 
-    # CSV 파일이 없는 경우 DB 접속 후 읽어오기
-    if not os.path.exists(DATA_FILE_PATH):
-        initialize_csv()
+    # CSV 파일이 없는 경우 DB 정보로 초기화
+    if not os.path.exists(Paths.F_EMB_CSV):
+        initialize_ncs(EMB_TB_NM).to_csv(Paths.F_EMB_CSV, index=False)
 
     # CSV 텍스트 형태 데이터 가공 -> Numpy 배열로 변환
-    df = pd.read_csv(DATA_FILE_PATH)
+    df = pd.read_csv(Paths.F_EMB_CSV)
     EMB_COL_KEY = "embedding_unit_def"
     df[EMB_COL_KEY] = df[EMB_COL_KEY].apply(lambda x: np.fromstring(x.strip('[]'), sep=','))
     embedding_vectors = np.stack(df[EMB_COL_KEY].values).astype(np.float32)
