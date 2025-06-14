@@ -19,8 +19,8 @@ engine = create_engine(url=url, echo=True)
 # 경로
 EMB_TABLE_NAME = "tb_ncs_comp_unit_emb_test"
 ROOT_DIR = Path(os.getenv("PROJECT_ROOT_DIR")).resolve()
-CSV_DIR_PATH = ROOT_DIR / "csv"
-ANALYSIS_DIR_PATH = ROOT_DIR / "analysis"
+CSV_DIR_PATH = ROOT_DIR / "data" / "csv"
+ANALYSIS_DIR_PATH = ROOT_DIR / "data" / "analysis"
 DATA_FILE_PATH = CSV_DIR_PATH / f"{EMB_TABLE_NAME}.csv"
 
 
@@ -184,68 +184,67 @@ if __name__ == "__main__":
     print(f"Graph Generated [Node: {skill_graph.number_of_nodes()}, Edge: {skill_graph.number_of_edges()}]\n")
 
     if df is not None and not df.empty:
-        while True:
-            comp_unit_id = "2001030406" # input("능력단위 ID (쉼표로 구분): ")
-            comp_unit_ids = [s.strip() for s in comp_unit_id.split(',')]
-            target_comp_unit_id = "2001030407" # input("타겟 ID: ")
+        comp_unit_id = "2001030406" # input("능력단위 ID (쉼표로 구분): ")
+        comp_unit_ids = [s.strip() for s in comp_unit_id.split(',')]
+        target_comp_unit_id = "2001030407" # input("타겟 ID: ")
 
-            if not all(s_id in skill_graph.nodes for s_id in comp_unit_ids):
-                missing_ids = [s_id for s_id in comp_unit_ids if s_id not in skill_graph.nodes]
-                print(f"오류: 입력한 능력단위 ID 중 다음 ID(들)이 그래프에 존재하지 않습니다: {', '.join(missing_ids)}. 다시 확인해주세요.")
-                continue
+        if not all(s_id in skill_graph.nodes for s_id in comp_unit_ids):
+            missing_ids = [s_id for s_id in comp_unit_ids if s_id not in skill_graph.nodes]
+            print(f"오류: 입력한 능력단위 ID 중 다음 ID(들)이 그래프에 존재하지 않습니다: {', '.join(missing_ids)}. 다시 확인해주세요.")
+            exit(0)
 
-            if target_comp_unit_id not in skill_graph.nodes:
-                print(f"입력한 타겟 능력단위 ID '{target_comp_unit_id}'가 그래프에 존재하지 않습니다.")
-                continue
+        if target_comp_unit_id not in skill_graph.nodes:
+            print(f"입력한 타겟 능력단위 ID '{target_comp_unit_id}'가 그래프에 존재하지 않습니다.")
+            exit(0)
 
-            # 분석 시작 메시지는 파일에도 포함
-            output_lines.append("=" * 70)
-            output_lines.append(f"▶ 분석 요청 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            output_lines.append("=" * 70)
+        # 분석 시작 메시지는 파일에도 포함
+        output_lines.append("=" * 70)
+        output_lines.append(f"▶ 분석 요청 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        output_lines.append("=" * 70)
 
-            output_lines.append("\n[최적 경로 및 스킬 갭 분석]")
-            output_lines.append(f"▶ 현재 보유 역량")
-            for s in comp_unit_ids:
-                output_lines.append(f"\t- {skill_graph.nodes[s]['name']} (Level {skill_graph.nodes[s]['level']})")
-            output_lines.append(f"\n▶ 목표 역량")
-            output_lines.append(f"\t- {skill_graph.nodes[target_comp_unit_id]['name']} (Level {skill_graph.nodes[target_comp_unit_id]['level']})\n")
+        output_lines.append("\n[최적 경로 및 스킬 갭 분석]")
+        output_lines.append(f"▶ 현재 보유 역량")
+        for s in comp_unit_ids:
+            output_lines.append(f"\t- {skill_graph.nodes[s]['name']} (Level {skill_graph.nodes[s]['level']})")
+        output_lines.append(f"\n▶ 목표 역량")
+        output_lines.append(f"\t- {skill_graph.nodes[target_comp_unit_id]['name']} (Level {skill_graph.nodes[target_comp_unit_id]['level']})\n")
 
-            # 3. 경로 탐색 및 결과 출력
-            recommended_path, skill_gap = find_career_path(skill_graph, comp_unit_ids, target_comp_unit_id)
-            current_lecture_set = set()
-            target_lecture_set = set()
+        # 3. 경로 탐색 및 결과 출력
+        recommended_path, skill_gap = find_career_path(skill_graph, comp_unit_ids, target_comp_unit_id)
+        current_lecture_set = set()
+        target_lecture_set = set()
 
-            if recommended_path:
-                output_lines.append("[분석 결과]")
-                output_lines.append("🚀 당신을 위한 추천 성장 로드맵 🚀")
+        if recommended_path:
+            output_lines.append("[분석 결과]")
+            output_lines.append("🚀 당신을 위한 추천 성장 로드맵 🚀")
 
-                for i, skill_id in enumerate(recommended_path):
-                    node = skill_graph.nodes[skill_id]
-                    status = "✅ (보유)" if skill_id in comp_unit_ids else "🎯 (학습 필요)"
-                    output_lines.append(f"\t- {i + 1}. {node['name']} (Level {node['level']}) {status}")
+            for i, skill_id in enumerate(recommended_path):
+                node = skill_graph.nodes[skill_id]
+                status = "✅ (보유)" if skill_id in comp_unit_ids else "🎯 (학습 필요)"
+                output_lines.append(f"\t- {i + 1}. {node['name']} (Level {node['level']}) {status}")
 
-                output_lines.append("\n💡현재 보유한 역량 관련 강의")
-                courses = get_course_from_node(comp_unit_id, engine)
+            output_lines.append("\n💡현재 보유한 역량 관련 강의")
+            courses = get_course_from_node(comp_unit_id, engine)
+            for course in courses:
+                if course not in current_lecture_set:
+                    output_lines.append(f"\t- {course}")
+                    current_lecture_set.add(course)
+
+            output_lines.append("\n💡스킬 갭(Skill Gap)")
+            for skill_id in skill_gap:
+                node = skill_graph.nodes[skill_id]
+                output_lines.append(f"{node['name']} (Level {node['level']})")
+                courses = get_course_from_node(skill_id, engine)
+
                 for course in courses:
-                    if course not in current_lecture_set:
+                    if course not in target_lecture_set:
                         output_lines.append(f"\t- {course}")
-                        current_lecture_set.add(course)
+                        target_lecture_set.add(course)
 
-                output_lines.append("\n💡스킬 갭(Skill Gap)")
-                for skill_id in skill_gap:
-                    node = skill_graph.nodes[skill_id]
-                    output_lines.append(f"{node['name']} (Level {node['level']})")
-                    courses = get_course_from_node(skill_id, engine)
+                output_lines.append("\n")
 
-                    for course in courses:
-                        if course not in target_lecture_set:
-                            output_lines.append(f"\t- {course}")
-                            target_lecture_set.add(course)
-
-                    output_lines.append("\n")
-
-            else:
-                output_lines.append("분석 실패: 목표 역량까지 도달 가능한 경로를 찾을 수 없습니다.")
+        else:
+            output_lines.append("분석 실패: 목표 역량까지 도달 가능한 경로를 찾을 수 없습니다.")
 
         # --- 프로그램 종료 시점에 파일 저장 ---
         ANALYSIS_DIR_PATH.mkdir(parents=True, exist_ok=True)  # 결과 저장할 디렉토리 생성

@@ -20,7 +20,7 @@ engine = create_engine(url=url, echo=True)
 
 # 경로
 ROOT_DIR = Path(os.getenv("PROJECT_ROOT_DIR")).resolve()
-CSV_DIR_PATH = ROOT_DIR / "csv"
+CSV_DIR_PATH = ROOT_DIR / "data" / "csv"
 DATA_FILE_PATH = CSV_DIR_PATH / "ncs_comp_unit.csv"
 
 # DEBUG 모드 유무
@@ -89,11 +89,9 @@ if __name__ == "__main__":
 
     # ---
 
-    # AI 전문가 양성, 인공지능, 머신러닝
     user_input = input("사용자 키워드 입력: ")
 
     # 사용자 입력에 대한 임베딩 생성
-    # Embedding 결과는 Tensor이므로 Numpy 배열로 변환
     user_embedding = asyncio.run(get_embedding_manager().get_avg_query_embedding([user_input]))
 
     # Tensor가 GPU(CUDA) 장치에 할당된 경우 Numpy로 변환하기 위해 cpu 메모리로 옮기는 작업이 필요
