@@ -1,4 +1,26 @@
-csv/
+# Python 관련 무시 목록
+__pycache__/
+*.pyc
+*.pyd
+*.so
+
+# 가상 환경
+.venv/
+env/
+venv/
+
+# IDE 및 OS 관련 파일
 .idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 데이터 및 로그
+*.csv
+*.log
+data/
+logs/
+csv/
+
+# 환경 변수 파일
 .env
-*/__pycache__/
