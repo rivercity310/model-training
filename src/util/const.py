@@ -18,10 +18,10 @@ class Paths:
     ANALYSIS = ROOT / "data" / "analysis"
     JSON = ROOT / "data" / "json"
     MODEL_OUTPUT = ROOT / "output"
+    DATASET = JSON / EMB_TB_NM
 
     # 파일 경로
     F_EMB_CSV = CSV / f"{EMB_TB_NM}.csv"
-    F_KURE_DS_JSON = JSON / "kure_train_dataset.json"
 
     @classmethod
     def get_kure_dataset_json(cls, batch_num: int) -> Path:
