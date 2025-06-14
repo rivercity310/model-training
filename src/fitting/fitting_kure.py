@@ -38,8 +38,9 @@ def load_ncs_dataset(path):
         for item in data:
             query = item['query']
             positive_doc = item['positive_document']
+            similarity = float(item['similarity'])
             target = f"{positive_doc['ncs_title']}: {positive_doc['ncs_description']}"
-            train_examples.append(InputExample(texts=[query, target]))
+            train_examples.append(InputExample(texts=[query, target], label=similarity))
 
     return train_examples
 
@@ -87,9 +88,11 @@ def train() -> bool:
     train_dataloader = DataLoader(train_samples, shuffle=True, batch_size=train_batch_size)
 
     # 손실 함수 정의
-    # - MultipleNegativesRankingLoss: 한 배치 내에서 [질문, 정답NCS]쌍 (긍정쌍)의
-    # - 나머지 (질문, 다른NCS) 쌍들의 유사도는 낮추도록 학습 -> 검색/추천에 매우 효과적
-    train_loss = losses.MultipleNegativesRankingLoss(model)
+    # 1. MultipleNegativesRankingLoss
+    # - 긍정쌍을 제외한 나머지 (질문, 다른NCS) 쌍들의 유사도는 낮추도록 학습 -> 검색/추천에 매우 효과적
+    # 2. CosineSimilarityLoss
+    # - 0.95점짜리 쌍은 벡터 공간에서 매우 가깝게, 0.7점짜리 쌍은 적당히 가깝게 배치하도록 학습하여 관계의 '정도'를 학습
+    train_loss = losses.CosineSimilarityLoss(model)
 
     # Evaluator 정의
     # - 매 에폭(epoch)이 끝날 때마다 모델의 성능을 평가하고, 가장 성능이 좋았던 모델을 자동 저장해줌

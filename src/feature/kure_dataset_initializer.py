@@ -4,42 +4,10 @@ import json
 from tqdm import tqdm
 from pathlib import Path
 from src.util import Paths, EMB_TB_NM, initialize_ncs, parse_json_from_text
-from src.infrastructure import model
+from src.infrastructure import invoke_ncs_datasest
 
 # 디버그
 DEBUG_MODE = True
-
-
-def invoke(ncs_name, ncs_level, ncs_desc):
-    json_format = """
-    [
-        {
-            "input":        // 사용자 질문
-            "similarity":   // 사용자 질문과 NCS의 매칭률
-        },
-        ...
-    ]    
-    """
-
-    prompt = f"""
-    아래 주어진 NCS 직무정보를 사용자의 질문에 매칭시켜야 해.
-    사용자는 주로 자신이 궁금한 분야에 대한 강의를 찾기 위해 질문해.
-    이를 고려해서 예상되는 질문을 최소 7개 이상 뽑아줘.
-    매칭률이 0.5 미만인 질문은 응답에서 제외해줘.
-    
-    ## NCS 직무정보
-    직무명: {ncs_name}
-    직무 수준: {ncs_level}
-    직무 설명: {ncs_desc}
-    
-    ## 응답 형식 (JSON)
-    {json_format}
-    """
-
-    if DEBUG_MODE:
-        print(prompt)
-
-    return model.invoke(prompt).text()
 
 
 # --- 파일 저장 함수 (새로 추가) ---
@@ -90,29 +58,27 @@ if __name__ == "__main__":
         level = row['comp_unit_level']
         desc = row['comp_unit_def']
 
-        res = invoke(name, level, desc)
+        results = invoke_ncs_datasest(name, level, desc)
         call_counter += 1
 
-        json_res = parse_json_from_text(res)
-
-        if json_res is None:
+        if results is None:
             print(f"WARN: {name}({code}) 직무의 응답을 파싱할 수 없습니다. 건너뜁니다.")
             continue
 
         if DEBUG_MODE:
-            print(json_res)
+            print(results)
 
         # LLM 응답을 최종 저장 형식으로 변환하여 버퍼에 추가
-        for val in json_res:
+        for question in results.questions:
             record = {
-                "query": val['input'],
+                "query": question.input,
                 "positive_document": {
                     "ncs_code": str(code),
                     "ncs_title": str(name),
                     "ncs_description": str(desc),
                     "level": int(level)
                 },
-                "similarity": float(val['similarity'])
+                "similarity": question.similarity
             }
 
             results_buffer.append(record)
