@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer, losses, util
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 from sentence_transformers.readers import InputExample
 from datetime import datetime
-from src.util import Paths
+from src.util import Paths, KURE_DATASET_GLOB
 
 # GPU 지원 Pytorch 설치
 # https://pytorch.org/get-started/locally/#slide-out-widget-area
@@ -51,17 +51,9 @@ def train() -> bool:
 
     # 모든 훈련 데이터셋을 메모리에 로딩
     all_samples = []
-    batch_num = 1
 
-    while True:
-        json_path = Paths.get_kure_dataset_json(batch_num)
-
-        if not json_path.exists():
-            print(f"총 {batch_num - 1}개의 데이터셋 파일을 로드했습니다.")
-            break
-
-        all_samples.extend(load_ncs_dataset(json_path))
-        batch_num += 1
+    for filepath in Paths.KURE_DATASET.glob(KURE_DATASET_GLOB):
+        all_samples.extend(load_ncs_dataset(filepath))
 
     if not all_samples:
         print("학습 데이터가 없습니다.")
@@ -76,7 +68,7 @@ def train() -> bool:
     train_size = int(len(all_samples) * 0.9)
     train_samples = all_samples[:train_size]
     eval_samples = all_samples[train_size:]
-    print(f"[데이터 {batch_num}] 전체: {len(all_samples)}, 훈련: {len(train_samples)}, 검증: {len(eval_samples)}")
+    print(f"[데이터] 전체: {len(all_samples)}, 훈련: {len(train_samples)}, 검증: {len(eval_samples)}")
 
     # 훈련 파라미터
     epochs = 4

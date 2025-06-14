@@ -10,7 +10,13 @@ from langchain.prompts import PromptTemplate
 from langchain.chat_models import init_chat_model
 from langchain.output_parsers import PydanticOutputParser
 from langchain.schema.output_parser import StrOutputParser
-from src.util import Paths, EMB_TB_NM, initialize_ncs, parse_json_from_text
+from src.util import (
+    Paths,
+    EMB_TB_NM,
+    KURE_DATASET_GLOB,
+    initialize_ncs,
+    parse_json_from_text
+)
 
 # 환경변수 로드
 load_dotenv()
@@ -132,14 +138,14 @@ def save_dataset(filepath: Path, data_to_append: list):
 
 def get_processed_ids() -> set[str]:
     """출력 디렉토리를 스캔하여 이미 처리된 NCS 코드 ID들을 set으로 반환"""
-    output_dir = Paths.DATASET
+    output_dir = Paths.KURE_DATASET
     processed_ids = set()
 
     if not output_dir.exists():
         return processed_ids
 
     # kure_dataset_*.json 패턴을 가진 모든 파일을 찾습니다.
-    for filepath in output_dir.glob("kure_train_dataset_*.json"):
+    for filepath in output_dir.glob(KURE_DATASET_GLOB):
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -154,7 +160,7 @@ def get_processed_ids() -> set[str]:
 
 
 def get_batch_num() -> int:
-    return len(list(Paths.DATASET.glob("kure_dataset_*.json"))) + 1
+    return len(list(Paths.KURE_DATASET.glob(KURE_DATASET_GLOB))) + 1
 
 
 if __name__ == "__main__":

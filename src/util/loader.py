@@ -18,7 +18,7 @@ def initialize_ncs(emb_table: str) -> pd.DataFrame:
     :param emb_table: 임베딩 테이블명
     :return: 쿼리 조회 결과
     """
-    if emb_table not in ["tb_ncs_comp_unit_emb", "tb_ncs_comp_unit_emb_test"]:
+    if emb_table not in ["ncs", "tb_ncs_comp_unit_emb_test"]:
         raise ValueError(f"유효하지 않은 테이블명: ${emb_table}")
 
     query = f"""
