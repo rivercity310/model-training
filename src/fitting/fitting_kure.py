@@ -1,6 +1,5 @@
 import os
 import json
-import math
 import torch
 import random
 from torch.utils.data import DataLoader, IterableDataset
