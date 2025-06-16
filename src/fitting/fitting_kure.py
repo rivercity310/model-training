@@ -231,17 +231,20 @@ def train() -> bool:
 
             global_step += 1
 
-            # --- 주기적인 모델 평가 및 저장 ---
-            if evaluator is not None and global_step % 1000 == 0:
+            if evaluator is not None and global_step > 0 and global_step % 1000 == 0:
                 print(f"\nStep {global_step}: 모델 성능 평가 중...")
                 model.eval()  # 모델을 평가 모드로 설정
 
-                # Evaluator 실행
-                score = evaluator(model, output_path=str(MODEL_OUTPUT_PATH))
+                # Evaluator를 실행하고 결과를 딕셔너리로 받습니다.
+                score_dict = evaluator(model)
+
+                # cosine_spearman 점수 추출
+                # - 실제 점수 값보다는 순위가 얼마나 비슷한지 초점
+                current_score = score_dict['ncs-eval_spearman_cosine']
 
                 # 최고 점수가 갱신되면 LoRa 어댑터만 저장
-                if score > best_score:
-                    best_score = score
+                if current_score > best_score:
+                    best_score = current_score
                     print(f"새로운 최고 점수 달성: {best_score:.4f}. LoRa 어댑터를 저장합니다.")
                     lora_adapter_path = MODEL_OUTPUT_PATH / "lora_adapter_best"
                     lora_adapter_path.mkdir(parents=True, exist_ok=True)
