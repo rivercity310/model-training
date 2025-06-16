@@ -2,20 +2,50 @@ import os
 import json
 import torch
 import random
+from dataclasses import dataclass
+from dotenv import load_dotenv
 from torch.utils.data import DataLoader, IterableDataset
 from sentence_transformers import SentenceTransformer, losses, util
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 from sentence_transformers.readers import InputExample
 from datetime import datetime
-from src.util import Paths, KURE_DATASET_GLOB
+from peft import LoraConfig, get_peft_model, PeftModel
+from pathlib import Path
 
 # GPU 지원 Pytorch 설치
 # https://pytorch.org/get-started/locally/#slide-out-widget-area
 # pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
+# 환경변수 로드
+load_dotenv()
+
+# 상수
+EMB_TB_NM = "tb_ncs_comp_unit_emb_test"
+KURE_DATASET_GLOB = "kure_train_dataset_*.json"
+
+
+@dataclass(frozen=True)
+class Paths:
+    # 폴더 경로
+    ROOT = Path(os.getenv("PROJECT_ROOT_DIR")).resolve()
+    CSV = ROOT / "data" / "csv"
+    ANALYSIS = ROOT / "data" / "analysis"
+    JSON = ROOT / "data" / "json"
+    MODEL_OUTPUT = ROOT / "output"
+    KURE_DATASET = JSON / "ncs"
+
+    # 파일 경로
+    F_EMB_CSV = CSV / f"{EMB_TB_NM}.csv"
+
+    @classmethod
+    def get_kure_dataset_json(cls, batch_num: int) -> Path:
+        return cls.JSON / "ncs" / f"kure_train_dataset_{batch_num}.json"
+
+
 # 경로 정의
 DATE = datetime.now().strftime("%y_%m_%d_%H_%M_%S")
 MODEL_OUTPUT_PATH = Paths.MODEL_OUTPUT / f"kure_finetuned_{DATE}"
+
 
 if not MODEL_OUTPUT_PATH.exists():
     MODEL_OUTPUT_PATH.mkdir(parents=True)
@@ -109,6 +139,23 @@ def train() -> bool:
     model = SentenceTransformer(model_name)
     print(f"[모델] {model_name} 모델의 학습을 시작합니다.")
 
+    # LoRa 적용
+    # - SentenceTransformer 내부 Transformer 모델에 LoRa 적용
+    # - 일반적으로 어텐션 레이어의 query, key, value 프로젝션에 적용
+    lora_config = LoraConfig(
+        r=16,                        # Rank: 8, 16, 32.. -> 높을수록 표현력과 파라미터 수 증가
+        lora_alpha=32,               # LoRa Scailing Factor: 일반적으로 Rank * 2
+        lora_dropout=0.05,
+        bias="none",
+        task_type="FEATURE_EXTRACTION"
+    )
+
+    # 모델에 LoRa 어댑터 추가
+    # - SentenceTransformer 모델의 Transformer 부분에 PEFT 모델 적용
+    model[0].auto_model = get_peft_model(model[0].auto_model, lora_config)
+    print("[LoRa] LoRa 어댑터를 모델에 적용했습니다.")
+    model[0].auto_model.print_trainable_parameters()     # 학습 가능한 파라미터 수 출력
+
     # 훈련 파라미터
     # - Streaming 데이터셋은 전체 길이를 미리 알 수 없으므로 warmup과 evaluation step을 고정된 값으로 설정
     epochs = 4
@@ -144,10 +191,12 @@ def train() -> bool:
     # 모델 학습 실행
     print("🎉 모델 학습이 완료되었습니다.")
 
-    # 학습된 모델을 저장
+    # 학습된 모델 저장
+    # - 전체 모델을 저장하는 대신 어댑터만 저장
     MODEL_OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
-    model.save(str(MODEL_OUTPUT_PATH))
-    print(f"모델이 {str(MODEL_OUTPUT_PATH)} 경로에 저장되었습니다.")
+    lora_adapter_path = MODEL_OUTPUT_PATH / "lora_adapter"
+    model[0].auto_model.save_pretrained(str(lora_adapter_path))
+    print(f"LoRa 어댑터가 {lora_adapter_path} 경로에 저장되었습니다.")
 
     return True
 
@@ -160,7 +209,17 @@ if __name__ == "__main__":
         exit(1)
 
     # 훈련된 모델 테스트
-    finetuned_model = SentenceTransformer(str(MODEL_OUTPUT_PATH))
+    base_model_name = os.getenv("EMBEDDING_MODEL")
+    finetuned_model = SentenceTransformer(base_model_name)
+    lora_adapter_path = MODEL_OUTPUT_PATH / "lora_adapter"
+
+    # 원본 모델에 LoRa 어댑터 결합
+    finetuned_model[0].auto_model = PeftModel.from_pretrained(
+        finetuned_model[0].auto_model, 
+        str(lora_adapter_path)
+    )
+    
+    print(f"\n[추론] 원본 모델({base_model_name})에 LoRa 어댑터({lora_adapter_path})를 결합했습니다.")
 
     # 검색 대상이 될 NCS 직무 정보
     corpus_docs_data = []

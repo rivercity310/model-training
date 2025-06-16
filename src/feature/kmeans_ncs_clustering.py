@@ -10,7 +10,7 @@ from src.infrastructure import get_embedding_manager
 from src.util import initialize_ncs, Paths, EMB_TB_NM
 
 # DEBUG 모드 유무
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 def show_training_graph(vectors, random_state: int = 42):
