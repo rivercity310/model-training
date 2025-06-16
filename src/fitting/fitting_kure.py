@@ -18,7 +18,7 @@ DATE = datetime.now().strftime("%y_%m_%d_%H_%M_%S")
 MODEL_OUTPUT_PATH = Paths.MODEL_OUTPUT / f"kure_finetuned_{DATE}"
 
 if not MODEL_OUTPUT_PATH.exists():
-    MODEL_OUTPUT_PATH.mkdir()
+    MODEL_OUTPUT_PATH.mkdir(parents=True)
 
 # GPU 정보
 is_available = torch.cuda.is_available()
@@ -129,7 +129,6 @@ def train() -> bool:
     # - 0.95점짜리 쌍은 벡터 공간에서 매우 가깝게, 0.7점짜리 쌍은 적당히 가깝게 배치하도록 학습하여 관계의 '정도'를 학습
     train_loss = losses.CosineSimilarityLoss(model)
 
-    # 모델 학습 실행
     # - 훈련 스텝의 10%를 워밍업으로 사용
     model.fit(
         train_objectives=[(train_dataloader, train_loss)],
@@ -142,6 +141,7 @@ def train() -> bool:
         show_progress_bar=True,
     )
 
+    # 모델 학습 실행
     print("🎉 모델 학습이 완료되었습니다.")
 
     # 학습된 모델을 저장

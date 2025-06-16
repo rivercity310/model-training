@@ -226,7 +226,7 @@ if __name__ == "__main__":
     CALLS_PER_MINUTE_LIMIT = 15
     SAVE_BATCH_SIZE = 50
     SLEEP_INTERVAL = 60 / CALLS_PER_MINUTE_LIMIT  # 호출 사이의 최소 대기 시간
-    MAX_WORKERS = 1 if IS_GEMINI else 10
+    MAX_WORKERS = 5 if IS_GEMINI else 10
 
     results_buffer = []
     call_counter = 0
@@ -238,8 +238,8 @@ if __name__ == "__main__":
             future = executor.submit(process_row, row)
             futures.append(future)
 
-            if IS_GEMINI:
-                time.sleep(SLEEP_INTERVAL)
+            # if IS_GEMINI:
+            #    time.sleep(SLEEP_INTERVAL)
 
         print(f"{len(futures)}개의 작업을 모두 제출했습니다. 이제 결과를 기다립니다...")
 
