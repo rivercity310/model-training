@@ -2,8 +2,10 @@ import os
 import json
 import torch
 import random
+from tqdm import tqdm
 from dataclasses import dataclass
 from dotenv import load_dotenv
+from torch.optim import AdamW
 from torch.utils.data import DataLoader, IterableDataset
 from sentence_transformers import SentenceTransformer, losses, util
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
@@ -11,6 +13,7 @@ from sentence_transformers.readers import InputExample
 from datetime import datetime
 from peft import LoraConfig, get_peft_model, PeftModel
 from pathlib import Path
+from transformers import get_linear_schedule_with_warmup
 
 # GPU 지원 Pytorch 설치
 # https://pytorch.org/get-started/locally/#slide-out-widget-area
@@ -99,6 +102,8 @@ def train() -> bool:
     if not is_available:
         print("WARN: GPU가 사용 가능하지 않습니다. CPU로 학습을 진행합니다.")
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     # 모든 훈련 데이터셋을 메모리에 로딩
     all_filepaths = sorted(list(Paths.KURE_DATASET.glob(KURE_DATASET_GLOB)))
 
@@ -156,26 +161,95 @@ def train() -> bool:
     print("[LoRa] LoRa 어댑터를 모델에 적용했습니다.")
     model[0].auto_model.print_trainable_parameters()     # 학습 가능한 파라미터 수 출력
 
+    # 모델을 GPU/CPU로 이동
+    model.to(device)
+
     # 훈련 파라미터
     # - Streaming 데이터셋은 전체 길이를 미리 알 수 없으므로 warmup과 evaluation step을 고정된 값으로 설정
     epochs = 4
     learning_rate = 2e-5
     train_batch_size = 16
     warmup_steps = 500
-    evaluation_steps = 1000
+    total_steps = 2000
 
     # v2.x 에서는 DataLoader를 직접 생성
     # DataLoader는 이제 IterableDataset으로부터 실시간으로 데이터를 스트리밍함
     # IterableDataset은 shuffle=True 옵션을 지원하지 않음 (필요 시 Dataset 내부에서 구현)
-    train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size)
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=train_batch_size,
+        collate_fn=model.smart_batching_collate
+    )
 
     # 손실 함수 정의
     # 1. MultipleNegativesRankingLoss
     # - 긍정쌍을 제외한 나머지 (질문, 다른NCS) 쌍들의 유사도는 낮추도록 학습 -> 검색/추천에 매우 효과적
     # 2. CosineSimilarityLoss
     # - 0.95점짜리 쌍은 벡터 공간에서 매우 가깝게, 0.7점짜리 쌍은 적당히 가깝게 배치하도록 학습하여 관계의 '정도'를 학습
-    train_loss = losses.CosineSimilarityLoss(model)
+    train_loss = losses.CosineSimilarityLoss(model).to(device)
 
+    # 옵티마이저 정의
+    optimizer = AdamW(model.parameters(), lr=learning_rate)
+
+    # IterableDataset은 전체 길이를 알 수 없으므로, 총 스텝 수를 예상하여 스케줄러 설정
+    # 예: (파일당 평균 샘플 수 * 파일 수) / 배치 사이즈 * 에폭
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+
+    # --- 수동 훈련 루프 (fit() 대체) ---
+    print("수동 훈련 루프를 시작합니다.")
+    global_step = 0
+    best_score = -1
+
+    for epoch in range(epochs):
+        print(f"[Epoch {epoch + 1}/{epochs}]")
+
+        # 모델을 훈련 모드로 설정
+        model.train()
+        progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1} Training", leave=False)
+
+        for batch in progress_bar:
+            sentence_features, labels = batch
+
+            features_on_device = []
+            for f in sentence_features:
+                features_on_device.append({key: val.to(device) for key, val in f.items()})
+
+            labels = labels.to(device)
+
+            # 손실 계산
+            # CosineSimilarityLoss 함수는 모델의 순전파 처리
+            loss = train_loss(features_on_device, labels)
+
+            # 역전파 및 가중치 업데이트
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+
+            # 진행률 표시줄에 현재 loss 값 표시
+            progress_bar.set_postfix(loss=loss.item())
+
+            global_step += 1
+
+            # --- 주기적인 모델 평가 및 저장 ---
+            if evaluator is not None and global_step % 1000 == 0:
+                print(f"\nStep {global_step}: 모델 성능 평가 중...")
+                model.eval()  # 모델을 평가 모드로 설정
+
+                # Evaluator 실행
+                score = evaluator(model, output_path=str(MODEL_OUTPUT_PATH))
+
+                # 최고 점수가 갱신되면 LoRa 어댑터만 저장
+                if score > best_score:
+                    best_score = score
+                    print(f"새로운 최고 점수 달성: {best_score:.4f}. LoRa 어댑터를 저장합니다.")
+                    lora_adapter_path = MODEL_OUTPUT_PATH / "lora_adapter_best"
+                    lora_adapter_path.mkdir(parents=True, exist_ok=True)
+                    model[0].auto_model.save_pretrained(str(lora_adapter_path))
+
+                model.train()  # 다시 훈련 모드로 전환
+
+    """
     # - 훈련 스텝의 10%를 워밍업으로 사용
     model.fit(
         train_objectives=[(train_dataloader, train_loss)],
@@ -187,6 +261,7 @@ def train() -> bool:
         optimizer_params={"lr": learning_rate},
         show_progress_bar=True,
     )
+    """
 
     # 모델 학습 실행
     print("🎉 모델 학습이 완료되었습니다.")

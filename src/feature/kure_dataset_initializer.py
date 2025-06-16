@@ -1,5 +1,4 @@
 import pandas as pd
-import time
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
