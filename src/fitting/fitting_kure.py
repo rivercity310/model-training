@@ -3,7 +3,6 @@ import json
 import torch
 import random
 from tqdm import tqdm
-from dataclasses import dataclass
 from dotenv import load_dotenv
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, IterableDataset
@@ -22,42 +21,93 @@ from transformers import get_linear_schedule_with_warmup
 # 환경변수 로드
 load_dotenv()
 
-# 상수
-EMB_TB_NM = "tb_ncs_comp_unit_emb_test"
-KURE_DATASET_GLOB = "kure_train_dataset_*.json"
-USE_LORA = False
-USE_TRAIN = False
-BASE_MODEL_NAME = os.getenv("EMBEDDING_MODEL")
+# 설정 파일 로드
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
+if not PROJECT_ROOT:
+    raise ValueError("환경변수 프로젝트 루트 경로가 설정되어 있지 않습니다.")
+
+CONFIG_FILE = Path(PROJECT_ROOT / "config" / "train_config.json")
+with open(CONFIG_FILE, "r") as f:
+    config = json.load(f)
+
+# --- 설정 값을 변수로 할당 ---
+MODEL_CFG = config['model_config']
+TRAIN_CFG = config['training_params']
+LORA_CFG = config['lora_params']
+DATA_CFG = config['data_config']
+
+# 데이터셋 관련 상수
+DATASET_DIR = DATA_CFG["dataset_dir"]
+DATASET_GLOB = DATA_CFG["dataset_glob"]
+
+# 모델 관련 상수
+BASE_MODEL_NAME = MODEL_CFG["nlpai-lab/KURE-v1"]
+FINETUNED_MODEL_NAME = MODEL_CFG["fine_tuned_model_name"]
+MODEL_OUTPUT_DIR = MODEL_CFG["output_dir"]
+USE_LORA = MODEL_CFG['use_lora']
+
+# 훈련 파라미터 상수 (하이퍼 파라미터)
+EPOCHS = TRAIN_CFG["epochs"]
+LEARNING_RATE = TRAIN_CFG["learning_rate"]
+TRAIN_BATCH_SIZE = TRAIN_CFG["train_batch_size"]
+WARMUP_STEPS = TRAIN_CFG["warmup_steps"]
+TOTAL_STEPS = TRAIN_CFG["total_steps"]
+EVALUATION_STEPS = TRAIN_CFG["evaluation_steps"]
+
+# Lora 설정 관련 상수
+LORA_RANK = LORA_CFG["r"]
+LORA_ALPHA = LORA_CFG["lora_alpha"]
+LORA_DROPOUT = LORA_CFG["lora_dropout"]
+LORA_BIAS = LORA_CFG["bias"]
+LORA_TASK_TYPE = LORA_CFG["task_type"]
+
+# 설정값 유효성 검사
+# --- 설정 값 유효성 검사 ---
+# 필수 파라미터 목록 (키: 설정 경로, 값: 할당된 변수)
+REQUIRED_PARAMS = {
+    "data_config.dataset_dir": DATASET_DIR,
+    "data_config.dataset_glob": DATASET_GLOB,
+    "model_config.base_model": BASE_MODEL_NAME,
+    "model_config.output_dir": MODEL_OUTPUT_DIR,
+    "model_config.use_lora": USE_LORA,
+    "model_config.fine_tuned_model_name": FINETUNED_MODEL_NAME,
+    "training_params.epochs": EPOCHS,
+    "training_params.learning_rate": LEARNING_RATE,
+    "training_params.train_batch_size": TRAIN_BATCH_SIZE,
+    "training_params.warmup_steps": WARMUP_STEPS,
+    "training_params.total_steps": TOTAL_STEPS,
+    "training_params.evaluation_steps": EVALUATION_STEPS
+}
+
+for key, value in REQUIRED_PARAMS.items():
+    print(f"{key}: {value}")
+    if value is None:
+        raise ValueError(f"설정 파일 오류: '{key}' 값이 누락되었거나 'null'입니다.")
+
+# LoRa 설정시 유효성 검사
+if USE_LORA:
+    REQUIRED_PARAMS = {
+        "lora_params.r": LORA_RANK,
+        "lora_params.lora_alpha": LORA_ALPHA,
+        "lora_params.lora_dropout": LORA_DROPOUT,
+        "lora_params.bias": LORA_BIAS,
+        "lora_params.task_type": LORA_TASK_TYPE,
+    }
+
+    for key, value in REQUIRED_PARAMS.items():
+        print(f"{key}: {value}")
+        if value is None:
+            raise ValueError(f"LoRa 설정 오류: '{key}' 값이 누락되었거나 'null'입니다.")
+
+# GPU 설정
 IS_AVAILABLE = torch.cuda.is_available()
 DEVICE = "cuda" if IS_AVAILABLE else "cpu"
-
 print(f"GPU 사용 가능 여부: {IS_AVAILABLE}")
 print(f"GPU 장치 수: {torch.cuda.device_count()}")
 print(f"현재 GPU 이름: {torch.cuda.get_device_name(0)}")
 
-
-@dataclass(frozen=True)
-class Paths:
-    # 폴더 경로
-    ROOT = Path(os.getenv("PROJECT_ROOT_DIR")).resolve()
-    CSV = ROOT / "data" / "csv"
-    ANALYSIS = ROOT / "data" / "analysis"
-    JSON = ROOT / "data" / "json"
-    MODEL_OUTPUT = ROOT / "output"
-    KURE_DATASET = JSON / "ncs"
-
-    # 파일 경로
-    F_EMB_CSV = CSV / f"{EMB_TB_NM}.csv"
-
-    @classmethod
-    def get_kure_dataset_json(cls, batch_num: int) -> Path:
-        return cls.JSON / "ncs" / f"kure_train_dataset_{batch_num}.json"
-
-
-# 경로 정의
-DATE = datetime.now().strftime("%y_%m_%d_%H_%M_%S")
-MODEL_OUTPUT_PATH = Paths.MODEL_OUTPUT / f"kure_finetuned_{DATE}"
-
+# 파인튜닝 모델 저장 경로 정의
+MODEL_OUTPUT_PATH = MODEL_OUTPUT_DIR / FINETUNED_MODEL_NAME
 
 if not MODEL_OUTPUT_PATH.exists():
     MODEL_OUTPUT_PATH.mkdir(parents=True)
@@ -101,16 +151,8 @@ def train():
     if not IS_AVAILABLE:
         print("WARN: GPU가 사용 가능하지 않습니다. CPU로 학습을 진행합니다.")
 
-    # 훈련 데이터셋 정의
-    # - Streaming 데이터셋은 전체 길이를 미리 알 수 없으므로 warmup과 evaluation step을 고정된 값으로 설정
-    epochs = 4
-    learning_rate = 2e-5
-    train_batch_size = 16
-    warmup_steps = 500
-    total_steps = 2000
-
     # 모든 훈련 데이터셋 경로를 메모리에 로딩
-    all_filepaths = list(Paths.KURE_DATASET.glob(KURE_DATASET_GLOB))
+    all_filepaths = list(DATASET_DIR.glob(DATASET_GLOB))
     random.shuffle(all_filepaths)
 
     if not all_filepaths:
@@ -145,16 +187,32 @@ def train():
     model = SentenceTransformer(BASE_MODEL_NAME)
     print(f"[모델] {BASE_MODEL_NAME} 모델의 학습을 시작합니다.")
 
+    # v2.x 에서는 DataLoader를 직접 생성
+    # DataLoader는 IterableDataset으로부터 실시간으로 데이터를 스트리밍함
+    # IterableDataset은 shuffle=True 옵션을 지원하지 않음 (필요 시 Dataset 내부에서 구현)
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=TRAIN_BATCH_SIZE,
+        collate_fn=model.smart_batching_collate
+    )
+
+    # 손실 함수 정의
+    # 1. MultipleNegativesRankingLoss
+    # - 긍정쌍을 제외한 나머지 (질문, 다른NCS) 쌍들의 유사도는 낮추도록 학습 -> 검색/추천에 매우 효과적
+    # 2. CosineSimilarityLoss
+    # - 0.95점짜리 쌍은 벡터 공간에서 매우 가깝게, 0.7점짜리 쌍은 적당히 가깝게 배치하도록 학습하여 관계의 '정도'를 학습
+    train_loss = losses.CosineSimilarityLoss(model).to(DEVICE)
+
     # LoRa 방식으로 학습
     if USE_LORA:
         # - SentenceTransformer 내부 Transformer 모델에 LoRa 적용
         # - 일반적으로 어텐션 레이어의 query, key, value 프로젝션에 적용
         lora_config = LoraConfig(
-            r=16,                        # Rank: 8, 16, 32.. -> 높을수록 표현력과 파라미터 수 증가
-            lora_alpha=32,               # LoRa Scailing Factor: 일반적으로 Rank * 2
-            lora_dropout=0.05,
-            bias="none",
-            task_type="FEATURE_EXTRACTION"
+            r=LORA_RANK,                         # Rank: 8, 16, 32.. -> 높을수록 표현력과 파라미터 수 증가
+            lora_alpha=LORA_ALPHA,               # LoRa Scailing Factor: 일반적으로 Rank * 2
+            lora_dropout=LORA_DROPOUT,
+            bias=LORA_BIAS,
+            task_type=LORA_TASK_TYPE
         )
 
         # 모델에 LoRa 어댑터 추가
@@ -166,36 +224,20 @@ def train():
         # 모델을 GPU/CPU로 이동
         model.to(DEVICE)
 
-        # v2.x 에서는 DataLoader를 직접 생성
-        # DataLoader는 이제 IterableDataset으로부터 실시간으로 데이터를 스트리밍함
-        # IterableDataset은 shuffle=True 옵션을 지원하지 않음 (필요 시 Dataset 내부에서 구현)
-        train_dataloader = DataLoader(
-            train_dataset,
-            batch_size=train_batch_size,
-            collate_fn=model.smart_batching_collate
-        )
-
-        # 손실 함수 정의
-        # 1. MultipleNegativesRankingLoss
-        # - 긍정쌍을 제외한 나머지 (질문, 다른NCS) 쌍들의 유사도는 낮추도록 학습 -> 검색/추천에 매우 효과적
-        # 2. CosineSimilarityLoss
-        # - 0.95점짜리 쌍은 벡터 공간에서 매우 가깝게, 0.7점짜리 쌍은 적당히 가깝게 배치하도록 학습하여 관계의 '정도'를 학습
-        train_loss = losses.CosineSimilarityLoss(model).to(DEVICE)
-
         # 옵티마이저 정의
-        optimizer = AdamW(model.parameters(), lr=learning_rate)
+        optimizer = AdamW(model.parameters(), lr=LEARNING_RATE)
 
         # IterableDataset은 전체 길이를 알 수 없으므로, 총 스텝 수를 예상하여 스케줄러 설정
         # 예: (파일당 평균 샘플 수 * 파일 수) / 배치 사이즈 * 에폭
-        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+        scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=WARMUP_STEPS, num_training_steps=TOTAL_STEPS)
 
         # --- 수동 훈련 루프 (fit() 대체) ---
         print("수동 훈련 루프를 시작합니다.")
         global_step = 0
         best_score = -1
 
-        for epoch in range(epochs):
-            print(f"[Epoch {epoch + 1}/{epochs}]")
+        for epoch in range(EPOCHS):
+            print(f"[Epoch {epoch + 1}/{EPOCHS}]")
 
             # 모델을 훈련 모드로 설정
             model.train()
@@ -252,11 +294,11 @@ def train():
         model.fit(
             train_objectives=[(train_dataloader, train_loss)],
             evaluator=evaluator,
-            epochs=epochs,
-            evaluation_steps=total_steps,
-            warmup_steps=warmup_steps,
+            epochs=EPOCHS,
+            evaluation_steps=TOTAL_STEPS,
+            warmup_steps=WARMUP_STEPS,
             output_path=str(MODEL_OUTPUT_PATH),
-            optimizer_params={"lr": learning_rate},
+            optimizer_params={"lr": LEARNING_RATE},
             show_progress_bar=True
         )
 
@@ -265,7 +307,9 @@ def train():
 
 
 if __name__ == "__main__":
-    if USE_TRAIN:
+    YN = input("새 훈련을 시작할까요? (Y/N) ")
+
+    if YN == "Y":
         train()
 
     # 훈련된 모델 테스트
@@ -286,7 +330,7 @@ if __name__ == "__main__":
     corpus_docs_data = []
     batch_num = 1
 
-    for json_path in Paths.KURE_DATASET.glob(KURE_DATASET_GLOB):
+    for json_path in DATASET_DIR.glob(DATASET_GLOB):
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             for item in data:
